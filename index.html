@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineBot - Movie Explorer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Watchlist -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fa-solid fa-bookmark"></i> Watchlist</h2>
+                <button id="close-sidebar-btn" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="watchlist-container" id="watchlist-container">
+                <!-- Watchlist items will be injected here -->
+                <p class="empty-state">Your watchlist is empty.</p>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-main">
+            <header class="chat-header">
+                <div class="brand">
+                    <div class="bot-avatar header-avatar">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <div>
+                        <h1>CineBot</h1>
+                        <span class="status">Online</span>
+                    </div>
+                </div>
+                <button id="toggle-sidebar-btn" class="icon-btn">
+                    <i class="fa-solid fa-list"></i>
+                    <span class="badge" id="watchlist-badge" style="display:none;">0</span>
+                </button>
+            </header>
+
+            <div class="chat-history" id="chat-history">
+                <!-- Welcome Message -->
+                <div class="message bot-message">
+                    <div class="message-content">
+                        Hello! I'm CineBot 🎬. I can give you decision-making info with no spoilers. Try asking me about movies like:
+                        <ul class="suggestions">
+                            <li class="suggestion-tag">The Matrix</li>
+                            <li class="suggestion-tag">Interstellar</li>
+                            <li class="suggestion-tag">Parasite</li>
+                            <li class="suggestion-tag">La La Land</li>
+                            <li class="suggestion-tag">Se7en</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <form id="chat-form">
+                    <div class="input-wrapper">
+                        <input type="text" id="user-input" placeholder="Type a movie name..." autocomplete="off" required>
+                        <button type="submit" class="send-btn">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
