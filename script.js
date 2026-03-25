@@ -1,4 +1,6 @@
-// Main API keys have been securely moved to the backend Node.js Server (.env)
+const GEMINI_API_KEY = "AIzaSyD57YEowpR_JQRx6ClWbcxIB64o7x3Yncw";
+const GROQ_API_KEY = "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";
+const OMDB_API_KEY = "50d77de8"; // Get yours for free at omdbapi.com
 const JSONBIN_API_KEY = "$2a$10$3VVauxKUj13JRBuoSdE0FO.vhSBQXYm/Rka6o/VeZPzVS5Hu7ep/2"; // Get yours for free at jsonbin.io
 
 // State
@@ -230,29 +232,166 @@ async function fetchOmdbPoster(title, year) {
 }
 
 async function processQueryWithAI(query, typingId) {
+    const prompt = `You are CineBot, an expert movie recommendation AI. The user is asking about the movie: "${query}".
+If the user specifies a year in their query, YOU MUST return the exact movie released in that year.
+CRITICAL: If the requested movie is completely made-up, meaningless gibberish, or absolutely does not exist in reality, you MUST return a JSON with title "Not Found" and empty fields.
+HOWEVER, if the movie DOES genuinely exist, but you simply lack deep information about it, DO NOT return "Not Found". Instead, return the exact requested title and use logical estimates based on the genre and title to carefully fill in the missing subjective fields (Tone, Pacing, Rewatch Value, etc).
+
+You MUST respond strictly with a raw JSON object (NO markdown blocks, NO \`\`\`json, just the raw JSON object string) matching this schema exactly:
+{
+  "id": "generate_a_unique_short_string_no_spaces",
+  "title": "Exact Movie Title",
+  "year": "Release Year",
+  "imdb": "IMDB rating e.g. 8.5",
+  "reviews": "Estimated review count, e.g. 1.2M",
+  "genre": ["Genre1", "Genre2"],
+  "goodToWatch": "Brief compelling verdict (1-2 sentences)",
+  "tragic": "Yes/No with brief explanation",
+  "ending": "Happy / Bittersweet / Tragic / Open-ended",
+  "tone": "Comma separated tones (e.g. Gritty, philosophical)",
+  "pacing": "Fast / Moderate / Slow",
+  "rewatchValue": "High / Medium / Low",
+  "popularity": "High / Medium / Low / Legendary etc.",
+  "premise": "1-2 sentence premise without spoilers",
+  "similar": ["Similar Movie 1", "Similar Movie 2", "Similar Movie 3"],
+  "rottenTomatoes": "RT Score e.g. 95%",
+  "language": "Primary Language(s)",
+  "poster": ""
+}`;
+
+    let responseText = "";
+
     try {
-        const response = await fetch('/api/chat', {
+        // Attempt 1: Gemini API
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query })
+            body: JSON.stringify({
+                systemInstruction: { parts: [{ text: "You are a robotic movie database that only responds in pure JSON." }] },
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.3, responseMimeType: "application/json" }
+            })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to fetch movie details from backend.');
+        if (!geminiRes.ok) throw new Error(await geminiRes.text());
+        const data = await geminiRes.json();
+        responseText = data.candidates[0].content.parts[0].text;
+
+    } catch (geminiError) {
+        console.warn("Gemini Failed, falling back to Groq LLaMA...", geminiError);
+        
+        // Attempt 2: Groq API (Reverted to Massive 70B Model)
+        try {
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${GROQ_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: "llama-3.3-70b-versatile",
+                    temperature: 0.3,
+                    response_format: { type: "json_object" },
+                    messages: [
+                        { role: "system", content: "You are a robotic movie database that only responds in pure JSON." },
+                        { role: "user", content: prompt }
+                    ]
+                })
+            });
+
+            if (!groqRes.ok) throw new Error(await groqRes.text());
+            const data = await groqRes.json();
+            responseText = data.choices[0].message.content;
+            
+        } catch (groqError) {
+            console.error("Both APIs Failed:", groqError);
+            removeTypingIndicator(typingId);
+            appendBotTextMessage(`Sorry, I encountered an error connecting to both my primary and backup AI brains. <br><br><b>Technical Details:</b><br><small style="color: #ef4444">${escapeHTML(groqError.message)}</small>`);
+            return;
+        }
+    }
+
+    let movieData;
+    try {
+        movieData = JSON.parse(responseText.trim());
+    } catch (e) {
+        console.error("Failed to parse JSON from AI", responseText);
+        removeTypingIndicator(typingId);
+        appendBotTextMessage(`Sorry, I received an invalid response format from the AI.`);
+        return;
+    }
+
+        removeTypingIndicator(typingId);
+
+        if (movieData.title === "Not Found" || !movieData.title) {
+            // Attempt OMDb Fallback
+            if (OMDB_API_KEY && OMDB_API_KEY !== "YOUR_OMDB_KEY") {
+                try {
+                    const omdbRes = await fetch(`https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&t=${encodeURIComponent(query)}`);
+                    const omdbData = await omdbRes.json();
+                    if (omdbData.Response === "True") {
+                        movieData = {
+                            id: omdbData.imdbID || Date.now().toString(),
+                            title: omdbData.Title,
+                            year: omdbData.Year,
+                            imdb: omdbData.imdbRating && omdbData.imdbRating !== "N/A" ? omdbData.imdbRating : "?",
+                            reviews: omdbData.imdbVotes && omdbData.imdbVotes !== "N/A" ? omdbData.imdbVotes : "?",
+                            genre: omdbData.Genre && omdbData.Genre !== "N/A" ? omdbData.Genre.split(', ') : [],
+                            goodToWatch: "Data fallback triggered.",
+                            tragic: "Unknown",
+                            ending: "Unknown",
+                            tone: "Unknown",
+                            pacing: "Unknown",
+                            rewatchValue: "Unknown",
+                            popularity: "Unknown",
+                            premise: omdbData.Plot && omdbData.Plot !== "N/A" ? omdbData.Plot : "No premise available.",
+                            similar: [],
+                            rottenTomatoes: (omdbData.Ratings && omdbData.Ratings.find(r => r.Source === "Rotten Tomatoes")) ? omdbData.Ratings.find(r => r.Source === "Rotten Tomatoes").Value : "N/A",
+                            language: omdbData.Language && omdbData.Language !== "N/A" ? omdbData.Language : "Unknown",
+                            poster: omdbData.Poster && omdbData.Poster !== "N/A" ? omdbData.Poster : ""
+                        };
+                        appendBotTextMessage(`Groq couldn't confidently analyze this, but I found the basic data for <strong>${escapeHTML(movieData.title)}</strong> via OMDb!`);
+                        setTimeout(() => appendMovieCard(movieData), 100);
+                        return;
+                    }
+                } catch(e) { console.error("OMDb Fallback Error:", e); }
+            }
+            appendBotTextMessage(`I couldn't find detailed info for "<b>${escapeHTML(query)}</b>". Please check the spelling or try another popular movie.`);
+            return;
         }
 
-        const movieData = await response.json();
-        removeTypingIndicator(typingId);
+        // Fetch a real, reliable poster using the free iTunes Search API matching title & year
+        let realPoster = await fetchItunesPoster(movieData.title, movieData.year);
 
-        appendBotTextMessage(`Here is the info you requested for <strong>${escapeHTML(movieData.title)}</strong>:`);
+        // If iTunes doesn't have it (obscure or upcoming movie), try OMDb API as a fallback
+        if (!realPoster) {
+            realPoster = await fetchOmdbPoster(movieData.title, movieData.year);
+        }
+
+        if (realPoster) {
+            movieData.poster = realPoster;
+        }
+
+        // Live OMDb Data Sync to correct AI formatting hallucinations
+        if (OMDB_API_KEY && OMDB_API_KEY !== "YOUR_OMDB_KEY") {
+            try {
+                const queryTitle = movieData.title !== "Not Found" ? movieData.title : query;
+                const omdbRes = await fetch(`https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&t=${encodeURIComponent(queryTitle)}&y=${encodeURIComponent(movieData.year || '')}`);
+                const omdbData = await omdbRes.json();
+                if (omdbData.Response === "True") {
+                    if (omdbData.imdbRating && omdbData.imdbRating !== "N/A") movieData.imdb = omdbData.imdbRating;
+                    if (omdbData.imdbVotes && omdbData.imdbVotes !== "N/A") movieData.reviews = omdbData.imdbVotes;
+                    if (omdbData.Language && omdbData.Language !== "N/A") movieData.language = omdbData.Language;
+                    const rtObj = omdbData.Ratings && omdbData.Ratings.find(r => r.Source === "Rotten Tomatoes");
+                    if (rtObj) movieData.rottenTomatoes = rtObj.Value;
+                }
+            } catch(e) { console.error("OMDb Live Sync Error:", e); }
+        }
+
+        appendBotTextMessage(`Here is the decision-making info you requested for <strong>${escapeHTML(movieData.title)}</strong>:`);
         setTimeout(() => appendMovieCard(movieData), 100);
 
-    } catch (error) {
-        console.error('Backend Error:', error);
         removeTypingIndicator(typingId);
-        appendBotTextMessage(`<b>Server Error:</b> ${escapeHTML(error.message)}<br><small>Make sure your backend server is running!</small>`);
-    }
 }
 
 // Watchlist Logic
